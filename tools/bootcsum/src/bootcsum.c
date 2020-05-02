@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #define MAGIC 0x95DACFDC
 
@@ -24,9 +25,12 @@ int main (int argc, char *argv[]) {
     FILE* rom_file;
 
     uint32_t rom_buffer[0x1000 / sizeof(uint32_t)];
-    rom_file = fopen(argv[1], "r");
-    fread(rom_buffer, sizeof(uint32_t), 0x1000 / sizeof(uint32_t), rom_file);
+    rom_file = fopen(argv[1], "rb");
+    size_t n = fread(rom_buffer, sizeof(uint32_t), 0x1000 / sizeof(uint32_t), rom_file);
     fclose(rom_file); 
+    if (n != 0x1000 / sizeof(uint32_t)) {
+        return -1;
+    }
 
     // LE to BE
     for (int i = 0; i < 0x1000 / sizeof(uint32_t); i++) {
@@ -40,13 +44,13 @@ int main (int argc, char *argv[]) {
         // Calculation
         uint64_t checksum = calculate_checksum(&rom_buffer[0x10]);
 
-        printf("0x%llx\n", checksum);
+        printf("0x%" PRIx64 "\n", checksum);
         return 0;
     }
     
     if (argc == 3) {
         // Verification
-        uint64_t expected_checksum = strtol(argv[2], NULL, 0);
+        uint64_t expected_checksum = strtoll(argv[2], NULL, 0);
         uint64_t checksum = calculate_checksum(&rom_buffer[0x10]); 
        
         if (checksum == expected_checksum) {
@@ -55,7 +59,7 @@ int main (int argc, char *argv[]) {
         }
         else {
             printf("Incorrect:\n");
-            printf("Expected 0x%llx, got 0x%llx\n", expected_checksum, checksum);
+            printf("Expected 0x%" PRIx64 ", got 0x%" PRIx64 "\n", expected_checksum, checksum);
             return -1;
         }
     }
@@ -178,7 +182,7 @@ uint64_t calculate_checksum (uint32_t *bcode) {
         frame_word = *frame_word_ptr;
 
         // Calculations
-        sframe[0] += ((frame_word << (0x20 - frame_word & 0x1f)) | frame_word >> (frame_word & 0x1f));
+        sframe[0] += ((frame_word << ((0x20 - frame_word) & 0x1f)) | frame_word >> (frame_word & 0x1f));
 
         if (frame_word < sframe[0]) {
             sframe[1] += frame_word;
@@ -194,7 +198,7 @@ uint64_t calculate_checksum (uint32_t *bcode) {
             sframe[2] = checksum_helper(sframe[2], frame_word, frame_number);
         }
 
-        if (frame_word & 0x01 == 1) {
+        if ((frame_word & 0x01) == 1) {
             sframe[3] ^= frame_word;
         }
         else {

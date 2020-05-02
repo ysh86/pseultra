@@ -13,7 +13,7 @@
 #define MAGIC 0x95DACFDC
 
 void find_collision (uint32_t *bcode, uint64_t desired_checksum, uint16_t starthword);
-static inline uint64_t checksum_helper (uint64_t op1, uint64_t op2, uint64_t op3);
+static inline uint32_t checksum_helper (uint32_t op1, uint32_t op2, uint32_t op3);
 
 int main (int argc, char *argv[]) {
     // If arguments not adequate
@@ -25,9 +25,12 @@ int main (int argc, char *argv[]) {
     FILE* rom_file;
 
     uint32_t rom_buffer[0x1000 / sizeof(uint32_t)];
-    rom_file = fopen(argv[1], "r");
-    fread(rom_buffer, sizeof(uint32_t), 0x1000 / sizeof(uint32_t), rom_file);
+    rom_file = fopen(argv[1], "rb");
+    size_t n = fread(rom_buffer, sizeof(uint32_t), 0x1000 / sizeof(uint32_t), rom_file);
     fclose(rom_file); 
+    if (n != 0x1000 / sizeof(uint32_t)) {
+        return -1;
+    }
 
     // LE to BE
     for (int i = 0; i < 0x1000 / sizeof(uint32_t); i++) {
@@ -36,7 +39,7 @@ int main (int argc, char *argv[]) {
         rom_buffer[i]  = be;
     }
 
-    uint64_t checksum = strtol(argv[2], NULL, 0);
+    uint64_t checksum = strtoll(argv[2], NULL, 0);
     uint16_t starthword = strtol(argv[3], NULL, 0);
 
     find_collision(&rom_buffer[0x10], checksum, starthword);
@@ -47,7 +50,7 @@ int main (int argc, char *argv[]) {
 /*
  * Helper function commonly called during checksum
  */
-static inline uint64_t checksum_helper (uint64_t op1, uint64_t op2, uint64_t op3) {
+static inline uint32_t checksum_helper (uint32_t op1, uint32_t op2, uint32_t op3) {
     int high_mult;
     int low_mult;
 
@@ -55,8 +58,8 @@ static inline uint64_t checksum_helper (uint64_t op1, uint64_t op2, uint64_t op3
         op2 = op3;
     }
 
-    low_mult = (op1 * op2) & 0x00000000FFFFFFFF; 
-    high_mult = ((op1 * op2) & 0xFFFFFFFF00000000) >> 32; 
+    low_mult = ((uint64_t)op1 * (uint64_t)op2) & 0x00000000FFFFFFFF;
+    high_mult = (((uint64_t)op1 * (uint64_t)op2) & 0xFFFFFFFF00000000) >> 32;
 
     if (high_mult - low_mult == 0) {
         return low_mult;
@@ -152,7 +155,7 @@ void find_collision (uint32_t *bcode, uint64_t desired_checksum, uint16_t starth
     }
 
     // Now let's try everything for the last word
-    for (uint64_t word = 0;; word ++) {
+    for (uint32_t word = 0;; word ++) {
         // Copy preframe over
         memcpy(&frame, &preframe, sizeof(frame));
 
@@ -243,7 +246,7 @@ void find_collision (uint32_t *bcode, uint64_t desired_checksum, uint16_t starth
                 sframe[2] = checksum_helper(sframe[2], frame_word, frame_number);
             }
     
-            if (frame_word & 0x01 == 1) {
+            if ((frame_word & 0x01) == 1) {
                 sframe[3] ^= frame_word;
             }
             else {
@@ -261,7 +264,7 @@ void find_collision (uint32_t *bcode, uint64_t desired_checksum, uint16_t starth
             for (uint32_t frame_number = 0; frame_number != 0x10; frame_number ++) {
                 frame_word = *frame_word_ptr;
                 
-                sframe[0] += ((frame_word << (0x20 - frame_word & 0x1f)) | frame_word >> (frame_word & 0x1f));
+                sframe[0] += ((frame_word << ((0x20 - frame_word) & 0x1f)) | frame_word >> (frame_word & 0x1f));
       
                 if (frame_word < sframe[0]) {
                     sframe[1] += frame_word;
@@ -277,7 +280,7 @@ void find_collision (uint32_t *bcode, uint64_t desired_checksum, uint16_t starth
             if ((checksum_helper(sframe[0], sframe[1], 0x10) & 0xffff) == (desired_checksum >> 32)) {
                 printf("COLLISION FOUND! Please notify developers.\n");
                 printf("Starthword: %x\n", starthword);
-                printf("Word: %llx\n", word);
+                printf("Word: %x\n", word);
             
                 return;
             }
