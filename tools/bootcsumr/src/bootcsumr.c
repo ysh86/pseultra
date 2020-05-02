@@ -50,57 +50,22 @@ int main (int argc, char *argv[]) {
 /*
  * Helper function commonly called during checksum
  */
-#include <immintrin.h>
 static inline uint32_t checksum_helper (uint32_t op1, uint32_t op2, uint32_t op3) {
+    int low_mult;
+    int high_mult;
+
     if (op2 == 0) {
         op2 = op3;
     }
 
-#if 1
-#if 1
-    uint64_t tmp = (uint64_t)op1 * (uint64_t)op2;
-    int32_t low_mult = tmp & 0x00000000FFFFFFFF;
-    int32_t high_mult = tmp >> 32;
-#else
-    int32_t low_mult;
-    int32_t high_mult;
-    __asm__(
-        "mul %3\n\t"
-        : "=a" (low_mult), "=d" (high_mult)
-        : "a" (op1), "r" (op2)
-    );
-#endif
+    low_mult = ((uint64_t)op1 * (uint64_t)op2) & 0x00000000FFFFFFFF;
+    high_mult = (((uint64_t)op1 * (uint64_t)op2) & 0xFFFFFFFF00000000) >> 32;
 
     if (high_mult - low_mult == 0) {
         return low_mult;
     }
 
     else return high_mult - low_mult;
-#else
-    // xmm1:  0,    op1,  0,    op1
-    // xmm2:  0,    op2,  0,    op2
-    // xmmhl: 12hi, 12lo, 12hi, 12lo
-    __m128i xmm1 = _mm_set1_epi64x(op1);
-    __m128i xmm2 = _mm_set1_epi64x(op2);
-    __m128i xmmhl = _mm_mul_epu32(xmm1, xmm2);
-
-    // xmm0h: 0,    12hi, 0,    12hi
-    // xmmeq: x,    0/1,  x,    0/1  // hi==0 なら x=1 else x=0
-    // xmmif: 0,    0/lo, 0,    0/lo
-    __m128i xmm0h = _mm_srli_epi64(xmmhl, 32);
-    __m128i xmmeq = _mm_cmpeq_epi32(xmmhl, xmm0h);
-    __m128i xmmif = _mm_and_si128(xmmeq, xmmhl);
-
-    // xmmsub: -h, hi-lo,    -h, hi-lo
-    // xmmans: -h, hi-lo/hi, -h, hi-lo/hi
-    __m128i xmmsub = _mm_sub_epi32(xmm0h, xmmhl);
-    __m128i xmmans = _mm_add_epi32(xmmsub, xmmif);
-
-    uint32_t ret;
-    //_mm_storeu_si32(&ret, xmmans);
-    _mm_store_ss((float*)&ret, _mm_castsi128_ps(xmmans));
-    return ret;
-#endif
 }
 
 /*
