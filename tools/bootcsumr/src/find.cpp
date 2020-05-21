@@ -1,4 +1,32 @@
+#define CL_HPP_TARGET_OPENCL_VERSION 120
+#define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#define CL_HPP_ENABLE_EXCEPTIONS
+#include <CL/cl2.hpp>
+
+#include <cstdio>
+#include <cstdlib>
+
 #include <stdint.h>
+
+#include <string>
+#include <array>
+#include <vector>
+#include <memory>
+#include <iostream>
+#include <fstream>
+#include <streambuf>
+
+static const size_t PLATFORM_INDEX = 0;
+
+static const size_t W = 1024;
+static const size_t H = 1024;
+
+const cl::NDRange kernelRangeGlobal(W, H);
+const cl::NDRange kernelRangeLocal(16, 16);
+
+#define kernelFile "src/find.cl"
+#define kernelName "find"
+
 
 // for 6102
 #define MAGIC 0x95DACFDC
@@ -59,6 +87,169 @@ static inline void second(uint32_t frame[], uint32_t prev_inst, uint32_t bcode_i
     frame[12] += (frame[8] ^ bcode_inst);
 }
 
+static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16], const uint32_t prev_inst, const uint32_t bcode_inst, uint32_t &word) {
+    cl_int err = CL_SUCCESS;
+    try {
+        // Platforms
+        // --------------------------------------------
+        std::cout << "=======================================" << std::endl;
+        std::cout << "Platforms" << std::endl;
+        std::cout << "=======================================" << std::endl;
+        std::vector<cl::Platform> platforms;
+        err |= cl::Platform::get(&platforms);
+        for (auto &plat : platforms) {
+            std::array<std::string, 5> params {{
+                plat.getInfo<CL_PLATFORM_PROFILE>(),
+                plat.getInfo<CL_PLATFORM_VERSION>(),
+                plat.getInfo<CL_PLATFORM_NAME>(),
+                plat.getInfo<CL_PLATFORM_VENDOR>(),
+                plat.getInfo<CL_PLATFORM_EXTENSIONS>(),
+            }};
+            for (auto &param : params) {
+                std::cout << param << std::endl;
+            }
+
+            std::cout << "--------------------" << std::endl;
+        }
+        if (platforms.size() == 0 || PLATFORM_INDEX >= platforms.size()) {
+            std::cout << "ERROR: No platforms" << std::endl;
+            return false;
+        }
+        std::cout << std::endl;
+
+        cl::Platform &plat = platforms[PLATFORM_INDEX];
+        std::cout << "Use platform " << PLATFORM_INDEX << std::endl;
+        std::cout << std::endl;
+
+
+        // Devices & Context
+        // --------------------------------------------
+        std::cout << "=======================================" << std::endl;
+        std::cout << "Devices" << std::endl;
+        std::cout << "=======================================" << std::endl;
+        std::vector<cl::Device> devices;
+        err |= plat.getDevices(CL_DEVICE_TYPE_ALL, &devices);
+        size_t i = 0;
+        for (auto &device : devices) {
+            std::cout << "--------------------" << std::endl;
+            std::cout << i << std::endl;
+            std::cout << "--------------------" << std::endl;
+
+            std::array<std::string, 11> params {{
+                device.getInfo<CL_DEVICE_NAME>(),
+                device.getInfo<CL_DEVICE_VENDOR>(),
+                device.getInfo<CL_DEVICE_PROFILE>(),
+                device.getInfo<CL_DEVICE_VERSION>(),
+                device.getInfo<CL_DRIVER_VERSION>(),
+                device.getInfo<CL_DEVICE_OPENCL_C_VERSION>(),
+                std::to_string(device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>()) + "[Cores] @ " + std::to_string(device.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>()) + "[MHz]",
+#if CL_HPP_TARGET_OPENCL_VERSION < 200
+                "Host Unified Memory: " + std::to_string(device.getInfo<CL_DEVICE_HOST_UNIFIED_MEMORY>()),
+                "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: " + std::string{ "?" },
+                "CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: " + std::string{ "?" },
+#else
+                "Host Unified Memory: " + std::string{ "?" },
+                "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: " + std::to_string(device.getInfo<CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE>()),
+                "CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: " + std::to_string(device.getInfo<CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE>()),
+#endif
+                device.getInfo<CL_DEVICE_EXTENSIONS>(),
+            }};
+            for (auto &param : params) {
+                std::cout << param << std::endl;
+            }
+            ++i;
+        }
+        if (devices.size() == 0) {
+            std::cout << "ERROR: No devices" << std::endl;
+            return false;
+        }
+        std::cout << std::endl;
+
+        i = 0;
+        cl::Device &device = devices[i];
+        std::cout << "Use device " << i << std::endl;
+        std::cout << std::endl;
+        // Context
+        cl::Context context(device);
+
+
+        // Build
+        // --------------------------------------------
+        std::ifstream from(kernelFile);
+        std::string kernelStr((std::istreambuf_iterator<char>(from)),
+                               std::istreambuf_iterator<char>());
+        from.close();
+        cl::Program::Sources sources {kernelStr};
+        cl::Program program = cl::Program(context, sources);
+        try {
+            err |= program.build("");
+        } catch (cl::Error err) {
+            std::cerr
+            << "ERROR: "
+            << err.what()
+            << "("
+            << err.err()
+            << ")"
+            << std::endl;
+
+            cl_int buildErr = CL_SUCCESS;
+            auto buildInfo = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(&buildErr);
+            for (auto &pair : buildInfo) {
+                std::cerr << pair.second << std::endl;
+            }
+            return false;
+        }
+
+        // Execution
+        // --------------------------------------------
+        cl::CommandQueue queue(
+            context,
+            cl::QueueProperties::None //cl::QueueProperties::Profiling
+        );
+
+        auto kernelFunc = cl::KernelFunctor<cl::Buffer, uint64_t, uint32_t, uint32_t>(program, kernelName);
+        auto kernel = kernelFunc.getKernel();
+        size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(device);
+        std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
+
+        cl::Buffer frameDev(context, CL_MEM_READ_WRITE, sizeof(uint32_t)*16);
+        err |= cl::copy(queue, preframe, preframe+16, frameDev);
+
+        kernelFunc(
+            cl::EnqueueArgs(
+                queue,
+                kernelRangeGlobal,
+                kernelRangeLocal
+            ),
+            frameDev,
+            static_cast<uint64_t>(desired_checksum),
+            static_cast<uint32_t>(prev_inst),
+            static_cast<uint32_t>(bcode_inst),
+            err
+        );
+        queue.finish();
+        // dump
+        {
+            auto frame = std::make_shared<std::vector<uint32_t>>(16);
+            err |= cl::copy(queue, frameDev, frame->data(), frame->data() + frame->size());
+
+            word = (*frame)[1];
+            return (*frame)[0] == 1;
+        }
+    }
+    catch (cl::Error err) {
+        std::cerr
+        << "ERROR: "
+        << err.what()
+        << "("
+        << err.err()
+        << ")"
+        << std::endl;
+    }
+
+    return false;
+}
+
 /*
  * Try to find checksum collision
  */
@@ -94,73 +285,7 @@ extern "C" bool find_collision (uint32_t *bcode, uint64_t desired_checksum) {
     uint32_t bcode_inst = bcode[0x3ee];
     uint32_t word = 0;
     bool found = false;
-    do {
-        // Calculate frame
-
-        // Copy preframe over
-        uint32_t frame[16] = {
-            preframe[0], preframe[1], preframe[2], preframe[3],
-            preframe[4], preframe[5], preframe[6], preframe[7],
-            preframe[8], preframe[9], preframe[10], preframe[11],
-            preframe[12], preframe[13], preframe[14], preframe[15],
-        };
-        // Frame calculations for 0x3ee
-        second(frame, prev_inst, bcode_inst, word, 0x3ee + 1);
-        // Frame calculations for 0x3ef
-        first(frame, bcode_inst, word, 0x3ef + 1);
-
-        // Calculates sframe
-
-        // First calculate sframe 2 and 3, they are independent and allow for faster checking
-        // Every value in sframe is initialized to frame[0]
-        uint32_t sframe2 = frame[0];
-        uint32_t sframe3 = frame[0];
-        uint32_t i = 0;
-        do {
-            uint32_t frame_word = frame[i];
-
-            if (((frame_word & 0x02) >> 1) == (frame_word & 0x01)) {
-                sframe2 += frame_word;
-            } else {
-                sframe2 = checksum_helper(sframe2, frame_word, i);
-            }
-
-            if ((frame_word & 0x01) == 1) {
-                sframe3 ^= frame_word;
-            } else {
-                sframe3 = checksum_helper(sframe3, frame_word, i);
-            }
-        } while (++i != 16);
-        uint32_t high_part = (sframe2 ^ sframe3);
-        if (high_part != (desired_checksum & 0xffffffff)) {
-            continue;
-        }
-
-        // If high part of checksum matches continue to calculate sframe 1 and 0
-        // Every value in sframe is initialized to frame[0]
-        uint32_t sframe0 = frame[0];
-        uint32_t sframe1 = frame[0];
-        i = 0;
-        do {
-            uint32_t frame_word = frame[i];
-
-            sframe0 += ((frame_word << ((0x20 - frame_word) & 0x1f)) | frame_word >> (frame_word & 0x1f));
-
-            if (frame_word < sframe0) {
-                sframe1 += frame_word;
-            } else {
-                sframe1 = checksum_helper(sframe1, frame_word, 0);
-            }
-        } while (++i != 16);
-        uint32_t low_part = (checksum_helper(sframe0, sframe1, 0x10) & 0xffff);
-        if (low_part != (desired_checksum >> 32)) {
-            continue;
-        }
-
-        found = true;
-        break;
-    } while (++word != 0);
-
+    found = findcl(desired_checksum, preframe, prev_inst, bcode_inst, word);
     if (found) {
         // Write word to end of bootcode
         bcode[0x3ef] = word;
