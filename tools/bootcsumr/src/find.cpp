@@ -18,11 +18,11 @@
 
 static const size_t PLATFORM_INDEX = 0;
 
-static const size_t W = 1024;
-static const size_t H = 1024;
+static const size_t W = 1024 * 64;
+static const size_t H = 1024 * 64;
 
 const cl::NDRange kernelRangeGlobal(W, H);
-const cl::NDRange kernelRangeLocal(16, 16);
+const cl::NDRange kernelRangeLocal(256, 1);
 
 #define kernelFile "src/find.cl"
 #define kernelName "find"
@@ -207,13 +207,16 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
             cl::QueueProperties::None //cl::QueueProperties::Profiling
         );
 
-        auto kernelFunc = cl::KernelFunctor<cl::Buffer, uint64_t, uint32_t, uint32_t>(program, kernelName);
+        auto kernelFunc = cl::KernelFunctor<cl::Buffer, cl::Buffer, uint64_t, uint32_t, uint32_t>(program, kernelName);
         auto kernel = kernelFunc.getKernel();
         size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(device);
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
 
-        cl::Buffer frameDev(context, CL_MEM_READ_WRITE, sizeof(uint32_t)*16);
-        err |= cl::copy(queue, preframe, preframe+16, frameDev);
+        uint32_t result[64] = {0,};
+        cl::Buffer resultDev(context, CL_MEM_WRITE_ONLY, sizeof(uint32_t)*64);
+        err |= cl::copy(queue, result, result+64, resultDev);
+        cl::Buffer preframeDev(context, CL_MEM_READ_ONLY, sizeof(uint32_t)*16);
+        err |= cl::copy(queue, preframe, preframe+16, preframeDev);
 
         kernelFunc(
             cl::EnqueueArgs(
@@ -221,7 +224,8 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
                 kernelRangeGlobal,
                 kernelRangeLocal
             ),
-            frameDev,
+            resultDev,
+            preframeDev,
             static_cast<uint64_t>(desired_checksum),
             static_cast<uint32_t>(prev_inst),
             static_cast<uint32_t>(bcode_inst),
@@ -230,11 +234,10 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
         queue.finish();
         // dump
         {
-            auto frame = std::make_shared<std::vector<uint32_t>>(16);
-            err |= cl::copy(queue, frameDev, frame->data(), frame->data() + frame->size());
+            err |= cl::copy(queue, resultDev, result, result+64);
 
-            word = (*frame)[1];
-            return (*frame)[0] == 1;
+            word = result[1];
+            return result[0] != 0;
         }
     }
     catch (cl::Error err) {
