@@ -87,10 +87,10 @@ static inline void sframe01(uint32_t *sframe0, uint32_t *sframe1, uint32_t frame
 
 __kernel void find(
     __global uint32_t *result,
-    __global const uint32_t *preframe,
-    uint64_t desired_checksum,
-    uint32_t prev_inst,
-    uint32_t bcode_inst
+    __constant uint32_t *preframe,
+    const uint64_t desired_checksum,
+    const uint32_t prev_inst,
+    const uint32_t bcode_inst
 )
 {
     // Copy preframe over
@@ -163,6 +163,7 @@ __kernel void find(
         }
 
         // found
+        // TODO: atomic store!
         result[0] = 1;
         result[1] = word;
         return;

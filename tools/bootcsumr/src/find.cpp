@@ -17,6 +17,7 @@
 #include <streambuf>
 
 static const size_t PLATFORM_INDEX = 0;
+static const size_t DEVICE_INDEX = 0;
 
 static const size_t W = 1024 * 64;
 static const size_t H = 1024 * 64;
@@ -135,7 +136,7 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
             std::cout << i << std::endl;
             std::cout << "--------------------" << std::endl;
 
-            std::array<std::string, 11> params {{
+            std::array<std::string, 14> params {{
                 device.getInfo<CL_DEVICE_NAME>(),
                 device.getInfo<CL_DEVICE_VENDOR>(),
                 device.getInfo<CL_DEVICE_PROFILE>(),
@@ -143,6 +144,9 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
                 device.getInfo<CL_DRIVER_VERSION>(),
                 device.getInfo<CL_DEVICE_OPENCL_C_VERSION>(),
                 std::to_string(device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>()) + "[Cores] @ " + std::to_string(device.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>()) + "[MHz]",
+                "Work item: " + std::to_string(device.getInfo<CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS>()) + ", " + std::to_string(device.getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>()[0]) + ", " + std::to_string(device.getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>()[1]) + ", " + std::to_string(device.getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>()[2]),
+                "Work group: " + std::to_string(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>()),
+                "Constant: " + std::to_string(device.getInfo<CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE>()),
 #if CL_HPP_TARGET_OPENCL_VERSION < 200
                 "Host Unified Memory: " + std::to_string(device.getInfo<CL_DEVICE_HOST_UNIFIED_MEMORY>()),
                 "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: " + std::string{ "?" },
@@ -165,7 +169,7 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
         }
         std::cout << std::endl;
 
-        i = 0;
+        i = DEVICE_INDEX;
         cl::Device &device = devices[i];
         std::cout << "Use device " << i << std::endl;
         std::cout << std::endl;
