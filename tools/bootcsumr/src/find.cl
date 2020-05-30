@@ -34,18 +34,29 @@ static inline void first(uint16 *frame, uint32_t prev_inst, uint32_t bcode_inst,
     } else {
         frame->s9 += bcode_inst;
     }
+#if 0
     frame->s4 += ((bcode_inst << (0x20 - (prev_inst & 0x1f))) | (bcode_inst >> (prev_inst & 0x1f)));
     frame->s7 = checksum_helper(frame->s7, ((bcode_inst >> (0x20 - (prev_inst & 0x1f))) | (bcode_inst << (prev_inst & 0x1f))), loop_count);
+#else
+    frame->s4 += rotate(bcode_inst, (0x20 - prev_inst));
+    frame->s7 = checksum_helper(frame->s7, rotate(bcode_inst, prev_inst), loop_count);
+#endif
     if (bcode_inst < frame->s6) {
         frame->s6 = (bcode_inst + loop_count) ^ (frame->s3 + frame->s6);
     } else {
         frame->s6 = (frame->s4 + bcode_inst) ^ frame->s6;
     }
+#if 0
     frame->s5 += (bcode_inst >> (0x20 - (prev_inst >> 27))) | (bcode_inst << (prev_inst >> 27));
     frame->s8 = checksum_helper(frame->s8, (bcode_inst << (0x20 - (prev_inst >> 27))) | (bcode_inst >> (prev_inst >> 27)), loop_count);
+#else
+    frame->s5 += rotate(bcode_inst, (prev_inst >> 27));
+    frame->s8 = checksum_helper(frame->s8, rotate(bcode_inst, (0x20 - (prev_inst >> 27))), loop_count);
+#endif
 }
 
 static inline void second(uint16 *frame, uint32_t prev_inst, uint32_t bcode_inst, uint32_t next_inst, uint32_t loop_count) {
+#if 0
     uint32_t tmp1 = checksum_helper(frame->sF, (bcode_inst >> (0x20 - (prev_inst >> 27))) | (bcode_inst << (prev_inst >> 27)), loop_count);
     frame->sF = checksum_helper(
         tmp1,
@@ -53,10 +64,21 @@ static inline void second(uint16 *frame, uint32_t prev_inst, uint32_t bcode_inst
         loop_count
     );
     uint32_t tmp2 = ((bcode_inst << (0x20 - (prev_inst & 0x1f))) | (bcode_inst >> (prev_inst & 0x1f)));
+#else
+    uint32_t tmp1 = checksum_helper(frame->sF, rotate(bcode_inst, (prev_inst >> 27)), loop_count);
+    frame->sF = checksum_helper(tmp1, rotate(next_inst, (bcode_inst >> 27)), loop_count);
+    uint32_t tmp2 = rotate(bcode_inst, (0x20 - prev_inst));
+#endif
     uint32_t tmp3 = checksum_helper(frame->sE, tmp2, loop_count); // v0 at 1384
+#if 0
     uint32_t tmp4 = checksum_helper(tmp3, (next_inst >> (bcode_inst & 0x1f)) | (next_inst << (0x20 - (bcode_inst & 0x1f))), loop_count); // v0 at 13a4
     frame->sE = tmp4;
     frame->sD += ((bcode_inst >> (bcode_inst & 0x1f)) | (bcode_inst << (0x20 - (bcode_inst & 0x1f)))) + ((next_inst >> (next_inst & 0x1f)) | (next_inst << (0x20 - (next_inst & 0x1f))));
+#else
+    uint32_t tmp4 = checksum_helper(tmp3, rotate(next_inst, (0x20 - bcode_inst)), loop_count); // v0 at 13a4
+    frame->sE = tmp4;
+    frame->sD += rotate(bcode_inst, (0x20 - bcode_inst)) + rotate(next_inst, (0x20 - next_inst));
+#endif
     frame->sA = checksum_helper(frame->sA + bcode_inst, next_inst, loop_count);
     frame->sB = checksum_helper(frame->sB ^ bcode_inst, next_inst, loop_count);
     frame->sC += (frame->s8 ^ bcode_inst);
@@ -77,7 +99,11 @@ static inline void sframe23(uint32_t *sframe2, uint32_t *sframe3, uint32_t frame
 }
 
 static inline void sframe01(uint32_t *sframe0, uint32_t *sframe1, uint32_t frame_word) {
+#if 0
     *sframe0 += ((frame_word << ((0x20 - frame_word) & 0x1f)) | frame_word >> (frame_word & 0x1f));
+#else
+    *sframe0 += rotate(frame_word, (0x20 - frame_word));
+#endif
 
     if (frame_word < *sframe0) {
         *sframe1 += frame_word;
