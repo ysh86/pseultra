@@ -1,26 +1,27 @@
-#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-
 typedef uint  uint32_t;
 typedef ulong uint64_t;
 
 #define Y_SHIFT 16
 
 static inline uint32_t checksum_helper (uint32_t op1, uint32_t op2, uint32_t op3) {
-    int low_mult;
-    int high_mult;
-
     if (op2 == 0) {
         op2 = op3;
     }
 
-    low_mult = ((uint64_t)op1 * (uint64_t)op2) & 0x00000000FFFFFFFF;
-    high_mult = (((uint64_t)op1 * (uint64_t)op2) & 0xFFFFFFFF00000000) >> 32;
-
+#if 0
+    int low_mult = ((uint64_t)op1 * (uint64_t)op2) & 0x00000000FFFFFFFF;
+    int high_mult = (((uint64_t)op1 * (uint64_t)op2) & 0xFFFFFFFF00000000) >> 32;
     if (high_mult - low_mult == 0) {
         return low_mult;
     } else {
         return high_mult - low_mult;
     }
+#else
+    int low_mult = op1 * op2;
+    int high_mult = mul_hi(op1, op2);
+    int diff = high_mult - low_mult;
+    return (diff) ? diff : low_mult;
+#endif
 }
 
 static inline void first(uint16 *frame, uint32_t prev_inst, uint32_t bcode_inst, uint32_t loop_count) {
