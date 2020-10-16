@@ -3,11 +3,11 @@ TARGET_EXEC ?= bootcsumr
 BUILD_DIR ?= ./build
 SRC_DIRS ?= ./src
 
-SRCS := $(shell find $(SRC_DIRS) -name *.cpp -or -name *.c -or -name *.s)
+SRCS := $(shell find -L $(SRC_DIRS) -name *.cpp -or -name *.c -or -name *.s)
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
 
-INC_DIRS := $(shell find $(SRC_DIRS) -type d)
+INC_DIRS := $(shell find -L $(SRC_DIRS) -type d)
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 
 CPPFLAGS ?= $(INC_FLAGS) -MMD -MP
@@ -18,12 +18,9 @@ CXXFLAGS += -Wall -Werror --std=c++11 -O3 -msse2
 
 # libs
 
-# OS
-#WSLENV ?= notwsl
-
 # OpenCL
-CPPFLAGS += -I$(HOME)/SDKs/OpenCL-Headers -I$(HOME)/SDKs/OpenCL-CLHPP/build/include -DCL_SILENCE_DEPRECATION
-ifdef WSLENV
+CPPFLAGS += -I$(HOME)/SDKs/OpenCL-Headers -I$(HOME)/SDKs/OpenCL-CLHPP/include -DCL_SILENCE_DEPRECATION
+ifdef WSL_DISTRO_NAME
 	TARGET_EXEC := $(TARGET_EXEC).exe
 	AS  := x86_64-w64-mingw32-as
 	CC  := x86_64-w64-mingw32-gcc-posix
