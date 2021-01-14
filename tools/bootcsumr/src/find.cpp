@@ -333,8 +333,9 @@ extern "C" bool find_collision (uint32_t *bcode, int type) {
     ::memcpy(preframes+128, preframes, 128*4);
 
     // Store starting hword into bootcode
-    constexpr uint32_t HI = 256;
-    for (uint32_t j = 0; j < HI; j++) {
+    constexpr uint32_t HIb = 0;
+    constexpr uint32_t HIe = 256;
+    for (uint32_t j = HIb; j < HIe; j++) {
         uint32_t starthword = j << 8; // 0x0000hilo
         uint32_t bcode_0x3ee[256];
         for (uint32_t i = 0; i < 256; i++) {
@@ -345,7 +346,7 @@ extern "C" bool find_collision (uint32_t *bcode, int type) {
             first(preframes+16*i, bcode[0x3ed], bcode_0x3ee[i], 0x3ee + 1);
         }
 
-        std::cout << "hword hi: " << j << "/" << HI << std::endl;
+        std::cout << "hword hi: " << j << "/" << HIe << std::endl;
 
         // Now let's try everything for the last word
         // Current frame being used to test
