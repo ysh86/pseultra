@@ -235,8 +235,8 @@ static bool find256(uint32_t &hword, uint32_t &word, const uint64_t desired_chec
         cl::Buffer preframesDev(context, CL_MEM_READ_ONLY, sizeof(uint32_t)*16*256);
         err |= cl::copy(queue, preframes, preframes+16*256, preframesDev);
 
-        constexpr uint32_t Z = 256;
-        for (uint32_t z = 0; z < Z; z++) {
+        constexpr uint32_t LO = 256;
+        for (uint32_t z = 0; z < LO; z++) {
             kernelFunc(
                 cl::EnqueueArgs(
                     queue,
@@ -253,7 +253,7 @@ static bool find256(uint32_t &hword, uint32_t &word, const uint64_t desired_chec
             );
 
             //queue.flush();
-            std::cout << "z: " << z << "/" << Z << std::endl;
+            std::cout << "  hword lo: " << z << "/" << LO << std::endl;
         }
         queue.finish();
         // dump
@@ -333,27 +333,32 @@ extern "C" bool find_collision (uint32_t *bcode, int type) {
     ::memcpy(preframes+128, preframes, 128*4);
 
     // Store starting hword into bootcode
-    // TODO: loop (starthword & 0xff00)
-    uint32_t starthword = 0x00000000;
-    uint32_t bcode_0x3ee[256];
-    for (uint32_t i = 0; i < 256; i++) {
-        bcode_0x3ee[i] = (bcode[0x3ee] & 0xffff0000) | starthword | i;
-        // Frame calculations for 0x3ed
-        second(preframes+16*i, bcode[0x3ec], bcode[0x3ed], bcode_0x3ee[i], 0x3ed + 1);
-        // Frame calculations for 0x3ee
-        first(preframes+16*i, bcode[0x3ed], bcode_0x3ee[i], 0x3ee + 1);
-    }
+    constexpr uint32_t HI = 256;
+    for (uint32_t j = 0; j < HI; j++) {
+        uint32_t starthword = j << 8; // 0x0000hilo
+        uint32_t bcode_0x3ee[256];
+        for (uint32_t i = 0; i < 256; i++) {
+            bcode_0x3ee[i] = (bcode[0x3ee] & 0xffff0000) | starthword | i;
+            // Frame calculations for 0x3ed
+            second(preframes+16*i, bcode[0x3ec], bcode[0x3ed], bcode_0x3ee[i], 0x3ed + 1);
+            // Frame calculations for 0x3ee
+            first(preframes+16*i, bcode[0x3ed], bcode_0x3ee[i], 0x3ee + 1);
+        }
 
-    // Now let's try everything for the last word
-    // Current frame being used to test
-    uint32_t hword = 0;
-    uint32_t word = 0;
-    bool found = false;
-    found = find256(hword, word, desired_checksum, preframes, bcode[0x3ed], bcode_0x3ee[0]);
-    if (found) {
-        // Write word to end of bootcode
-        bcode[0x3ee] = hword;
-        bcode[0x3ef] = word;
+        std::cout << "hword hi: " << j << "/" << HI << std::endl;
+
+        // Now let's try everything for the last word
+        // Current frame being used to test
+        uint32_t hword = 0;
+        uint32_t word = 0;
+        bool found = false;
+        found = find256(hword, word, desired_checksum, preframes, bcode[0x3ed], bcode_0x3ee[0]);
+        if (found) {
+            // Write word to end of bootcode
+            bcode[0x3ee] = hword;
+            bcode[0x3ef] = word;
+            return found;
+        }
     }
-    return found;
+    return false;
 }
