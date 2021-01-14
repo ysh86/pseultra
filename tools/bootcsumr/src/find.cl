@@ -80,8 +80,7 @@ static inline void second0x3ef(uint16 *frame, uint32_t prev_inst, uint32_t bcode
     frame->sE = tmp4;
     frame->sD += ((bcode_inst >> (bcode_inst & 0x1f)) | (bcode_inst << (0x20 - (bcode_inst & 0x1f)))) + ((next_inst >> (next_inst & 0x1f)) | (next_inst << (0x20 - (next_inst & 0x1f))));
 #else
-    uint32_t tmp4 = checksum_helper(tmp3, rotate(next_inst, (0x20 - bcode_inst)), 0x3ef); // v0 at 13a4
-    frame->sE = tmp4;
+    frame->sE = checksum_helper(tmp3, rotate(next_inst, (0x20 - bcode_inst)), 0x3ef); // v0 at 13a4
     frame->sD += rotate(bcode_inst, (0x20 - bcode_inst)) + rotate(next_inst, (0x20 - next_inst));
 #endif
     frame->sA = checksum_helper(frame->sA + bcode_inst, next_inst, 0x3ef);
@@ -122,9 +121,14 @@ __kernel void find(
     __constant uint32_t *preframe,
     const uint64_t desired_checksum,
     const uint32_t prev_inst,
-    const uint32_t bcode_inst
+    const uint32_t bcode_inst,
+    const uint32_t z
 )
 {
+    // set hword
+    preframe += 16 * z;
+    uint32_t hword = bcode_inst | z;
+
     // Copy preframe over
     uint16 frame = (uint16)(
         preframe[0], preframe[1], preframe[2], preframe[3],
@@ -138,9 +142,9 @@ __kernel void find(
     // Calculate frame
     {
         // Frame calculations for 0x3ee
-        second0x3ef(&frame, prev_inst, bcode_inst, word);
+        second0x3ef(&frame, prev_inst, hword, word);
         // Frame calculations for 0x3ef
-        first0x3f0(&frame, bcode_inst, word);
+        first0x3f0(&frame, hword, word);
 
         // Calculates sframe
 
@@ -198,6 +202,7 @@ __kernel void find(
         // TODO: atomic store!
         result[0] = 1;
         result[1] = word;
+        result[2] = hword;
         return;
     }
 }

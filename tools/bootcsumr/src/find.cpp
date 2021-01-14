@@ -88,7 +88,7 @@ static inline void second(uint32_t frame[], uint32_t prev_inst, uint32_t bcode_i
     frame[12] += (frame[8] ^ bcode_inst);
 }
 
-static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16], const uint32_t prev_inst, const uint32_t bcode_inst, uint32_t &word) {
+static bool find256(uint32_t &hword, uint32_t &word, const uint64_t desired_checksum, const uint32_t preframes[16*256], const uint32_t prev_inst, const uint32_t bcode_inst) {
     cl_int err = CL_SUCCESS;
     try {
         // Platforms
@@ -187,7 +187,7 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
         cl::Program program = cl::Program(context, sources);
         try {
             err |= program.build("");
-        } catch (cl::Error err) {
+        } catch (cl::Error &err) {
             std::cerr
             << "ERROR: "
             << err.what()
@@ -211,7 +211,7 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
             cl::QueueProperties::None //cl::QueueProperties::Profiling
         );
 
-        auto kernelFunc = cl::KernelFunctor<cl::Buffer, cl::Buffer, uint64_t, uint32_t, uint32_t>(program, kernelName);
+        auto kernelFunc = cl::KernelFunctor<cl::Buffer, cl::Buffer, uint64_t, uint32_t, uint32_t, uint32_t>(program, kernelName);
         auto kernel = kernelFunc.getKernel();
         size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(device);
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
@@ -219,32 +219,40 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
         uint32_t result[64] = {0,};
         cl::Buffer resultDev(context, CL_MEM_WRITE_ONLY, sizeof(uint32_t)*64);
         err |= cl::copy(queue, result, result+64, resultDev);
-        cl::Buffer preframeDev(context, CL_MEM_READ_ONLY, sizeof(uint32_t)*16);
-        err |= cl::copy(queue, preframe, preframe+16, preframeDev);
+        cl::Buffer preframesDev(context, CL_MEM_READ_ONLY, sizeof(uint32_t)*16*256);
+        err |= cl::copy(queue, preframes, preframes+16*256, preframesDev);
 
-        kernelFunc(
-            cl::EnqueueArgs(
-                queue,
-                kernelRangeGlobal,
-                kernelRangeLocal
-            ),
-            resultDev,
-            preframeDev,
-            static_cast<uint64_t>(desired_checksum),
-            static_cast<uint32_t>(prev_inst),
-            static_cast<uint32_t>(bcode_inst),
-            err
-        );
+        constexpr uint32_t Z = 256;
+        for (uint32_t z = 0; z < Z; z++) {
+            kernelFunc(
+                cl::EnqueueArgs(
+                    queue,
+                    kernelRangeGlobal,
+                    kernelRangeLocal
+                ),
+                resultDev,
+                preframesDev,
+                static_cast<uint64_t>(desired_checksum),
+                static_cast<uint32_t>(prev_inst),
+                static_cast<uint32_t>(bcode_inst),
+                z,
+                err
+            );
+
+            //queue.flush();
+            std::cout << "z: " << z << "/" << Z << std::endl;
+        }
         queue.finish();
         // dump
         {
             err |= cl::copy(queue, resultDev, result, result+64);
 
+            hword = result[2];
             word = result[1];
             return result[0] != 0;
         }
     }
-    catch (cl::Error err) {
+    catch (cl::Error &err) {
         std::cerr
         << "ERROR: "
         << err.what()
@@ -263,38 +271,48 @@ static bool findcl(const uint64_t desired_checksum, const uint32_t preframe[16],
 extern "C" bool find_collision (uint32_t *bcode, uint64_t desired_checksum) {
     // Generate frame. This is done earlier in IPC2
     // Pre-calculated frame, up to what changes
-    uint32_t preframe[16];
+    uint32_t preframes[16 * 256];
     uint32_t magic = MAGIC ^ bcode[0];
     for (int i = 0; i < 16; i ++) {
-        preframe[i] = magic;
+        preframes[i] = magic;
     };
 
     // Calculate pre-frame
     // Loop start, 11E8 - 11FC
     bcode[-1] = bcode[0]; // 1st prev
-    for (int32_t i = 0; i < 0x3ed; i++) {
-        first(preframe, bcode[i-1], bcode[i], i+1);
-        second(preframe, bcode[i-1], bcode[i], bcode[i+1], i+1);
+    int32_t i = 0;
+    for (; i < 0x3ed; i++) {
+        first(preframes, bcode[i-1], bcode[i], i+1);
+        second(preframes, bcode[i-1], bcode[i], bcode[i+1], i+1);
     }
+    first(preframes, bcode[i-1], bcode[i], i+1);
+
+    ::memcpy(preframes+16, preframes, 16*4);
+    ::memcpy(preframes+32, preframes, 32*4);
+    ::memcpy(preframes+64, preframes, 64*4);
+    ::memcpy(preframes+128, preframes, 128*4);
 
     // Store starting hword into bootcode
-    uint16_t starthword = 0;
-    bcode[0x3ee] = (bcode[0x3ee] & 0xffff0000) | starthword;
-    // Frame calculations for 0x3ed
-    first(preframe, bcode[0x3ec], bcode[0x3ed], 0x3ed + 1);
-    second(preframe, bcode[0x3ec], bcode[0x3ed], bcode[0x3ee], 0x3ed + 1);
-    // Frame calculations for 0x3ee
-    first(preframe, bcode[0x3ed], bcode[0x3ee], 0x3ee + 1);
+    // TODO: loop (starthword & 0xff00)
+    uint32_t starthword = 0x00000000;
+    uint32_t bcode_0x3ee[256];
+    for (uint32_t i = 0; i < 256; i++) {
+        bcode_0x3ee[i] = (bcode[0x3ee] & 0xffff0000) | starthword | i;
+        // Frame calculations for 0x3ed
+        second(preframes+16*i, bcode[0x3ec], bcode[0x3ed], bcode_0x3ee[i], 0x3ed + 1);
+        // Frame calculations for 0x3ee
+        first(preframes+16*i, bcode[0x3ed], bcode_0x3ee[i], 0x3ee + 1);
+    }
 
     // Now let's try everything for the last word
     // Current frame being used to test
-    uint32_t prev_inst = bcode[0x3ed];
-    uint32_t bcode_inst = bcode[0x3ee];
+    uint32_t hword = 0;
     uint32_t word = 0;
     bool found = false;
-    found = findcl(desired_checksum, preframe, prev_inst, bcode_inst, word);
+    found = find256(hword, word, desired_checksum, preframes, bcode[0x3ed], bcode_0x3ee[0]);
     if (found) {
         // Write word to end of bootcode
+        bcode[0x3ee] = hword;
         bcode[0x3ef] = word;
     }
     return found;
