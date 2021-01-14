@@ -29,8 +29,21 @@ const cl::NDRange kernelRangeLocal(256, 1);
 #define kernelName "find"
 
 
-// for 6102
-#define MAGIC 0x95DACFDC
+// type1
+#define MAGIC1 (((0x6c078965ULL * 0x3f) & 0xffffffff) + 1)
+#define KEY1 0x45CC73EE317AULL
+// type2
+#define MAGIC2 (((0x6c078965ULL * 0x3f) & 0xffffffff) + 1)
+#define KEY2 0xA536C0F1D859ULL
+// type3
+#define MAGIC3 (((0x6c078965ULL * 0x78) & 0xffffffff) + 1)
+#define KEY3 0x586FD4709867ULL
+// type5
+#define MAGIC5 (((0x6c078965ULL * 0x91) & 0xffffffff) + 1)
+#define KEY5 0x8618A45BC2D3ULL
+// type6
+#define MAGIC6 (((0x6c078965ULL * 0x85) & 0xffffffff) + 1)
+#define KEY6 0x2BBAD4E6EB74ULL
 
 static inline uint32_t checksum_helper (uint32_t op1, uint32_t op2, uint32_t op3) {
     int low_mult;
@@ -268,11 +281,38 @@ static bool find256(uint32_t &hword, uint32_t &word, const uint64_t desired_chec
 /*
  * Try to find checksum collision
  */
-extern "C" bool find_collision (uint32_t *bcode, uint64_t desired_checksum) {
+extern "C" bool find_collision (uint32_t *bcode, int type) {
+    uint32_t magic = bcode[0];
+    uint64_t desired_checksum;
+    switch (type) {
+    case 1:
+        magic ^= MAGIC1;
+        desired_checksum = KEY1;
+        break;
+    case 2:
+        magic ^= MAGIC2;
+        desired_checksum = KEY2;
+        break;
+    case 3:
+        magic ^= MAGIC3;
+        desired_checksum = KEY3;
+        break;
+    case 5:
+        magic ^= MAGIC5;
+        desired_checksum = KEY5;
+        break;
+    case 6:
+        magic ^= MAGIC6;
+        desired_checksum = KEY6;
+        break;
+    default:
+        return false;
+        break;
+    }
+
     // Generate frame. This is done earlier in IPC2
     // Pre-calculated frame, up to what changes
     uint32_t preframes[16 * 256];
-    uint32_t magic = MAGIC ^ bcode[0];
     for (int i = 0; i < 16; i ++) {
         preframes[i] = magic;
     };

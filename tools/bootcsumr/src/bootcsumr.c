@@ -9,23 +9,32 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
+#include <string.h>
 
 bool find_collision (uint32_t *bcode, uint64_t desired_checksum);
 
 int main (int argc, char *argv[]) {
     // If arguments not adequate
     if (argc != 3) {
-        fprintf(stderr, "Usage: bootcsumr <rom file> <checksum to search for>\n");
+        fprintf(stderr, "Usage: bootcsumr <rom file> <type(1,2,3,5,6)>\n");
         return -1;
     }
 
-    size_t nwords = 0x1000 / sizeof(uint32_t);
+    static const size_t nwords = 0x1000 / sizeof(uint32_t);
     uint32_t rom[nwords];
 
     FILE* fd = fopen(argv[1], "rb");
+    int e = errno;
+    if (!fd) {
+        fprintf(stderr, "err: %s\n", strerror(e));
+        return -1;
+    }
     size_t n = fread(rom, sizeof(uint32_t), nwords, fd);
+    e = errno;
     fclose(fd);
     if (n != nwords) {
+        fprintf(stderr, "err: %s\n", strerror(e));
         return -1;
     }
     // LE to BE
@@ -35,9 +44,8 @@ int main (int argc, char *argv[]) {
         rom[i]  = be;
     }
 
-    uint64_t checksum = strtoll(argv[2], NULL, 0);
-
-    bool found = find_collision(&rom[0x10], checksum);
+    int type = atoi(argv[2]);
+    bool found = find_collision(&rom[0x10], type);
     if (found) {
         printf("COLLISION FOUND!\n");
         printf("hword: %04x, word: %08x\n", rom[0x3fe] & 0xffff, rom[0x3ff]);
