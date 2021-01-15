@@ -254,6 +254,13 @@ static bool find256(uint32_t &hword, uint32_t &word, const uint64_t desired_chec
 
             //queue.flush();
             std::cout << "  hword lo: " << z << "/" << LO << std::endl;
+            // debug
+#if 0
+            ::printf("%016llx, %08x, %08x, %02x\n", desired_checksum, prev_inst, bcode_inst, z);
+            for (int i = 0; i < 16; i += 4) {
+                ::printf("%08x, %08x, %08x, %08x\n", preframes[16*0x6d+i+0], preframes[16*0x6d+i+1], preframes[16*0x6d+i+2], preframes[16*0x6d+i+3]);
+            }
+#endif
         }
         queue.finish();
         // dump
@@ -312,9 +319,9 @@ extern "C" bool find_collision (uint32_t *bcode, int type) {
 
     // Generate frame. This is done earlier in IPC2
     // Pre-calculated frame, up to what changes
-    uint32_t preframes[16 * 256];
+    uint32_t preframe[16];
     for (int i = 0; i < 16; i ++) {
-        preframes[i] = magic;
+        preframe[i] = magic;
     };
 
     // Calculate pre-frame
@@ -322,29 +329,26 @@ extern "C" bool find_collision (uint32_t *bcode, int type) {
     bcode[-1] = bcode[0]; // 1st prev
     int32_t i = 0;
     for (; i < 0x3ed; i++) {
-        first(preframes, bcode[i-1], bcode[i], i+1);
-        second(preframes, bcode[i-1], bcode[i], bcode[i+1], i+1);
+        first(preframe, bcode[i-1], bcode[i], i+1);
+        second(preframe, bcode[i-1], bcode[i], bcode[i+1], i+1);
     }
-    first(preframes, bcode[i-1], bcode[i], i+1);
-
-    ::memcpy(preframes+16, preframes, 16*4);
-    ::memcpy(preframes+32, preframes, 32*4);
-    ::memcpy(preframes+64, preframes, 64*4);
-    ::memcpy(preframes+128, preframes, 128*4);
+    first(preframe, bcode[i-1], bcode[i], i+1);
 
     // Store starting hword into bootcode
     constexpr uint32_t HIb = 0;
     constexpr uint32_t HIe = 256;
     for (uint32_t j = HIb; j < HIe; j++) {
-        uint32_t starthword = j << 8; // 0x0000hilo
-        uint32_t bcode_0x3ee[256];
+        uint32_t preframes[16*256];
+        uint32_t bcode_0x3ee;
         for (uint32_t i = 0; i < 256; i++) {
-            bcode_0x3ee[i] = (bcode[0x3ee] & 0xffff0000) | starthword | i;
+            ::memcpy(preframes+16*i, preframe, 16*4);
+            bcode_0x3ee = (bcode[0x3ee] & 0xffff0000) | (j << 8) | i;
             // Frame calculations for 0x3ed
-            second(preframes+16*i, bcode[0x3ec], bcode[0x3ed], bcode_0x3ee[i], 0x3ed + 1);
+            second(preframes+16*i, bcode[0x3ec], bcode[0x3ed], bcode_0x3ee, 0x3ed + 1);
             // Frame calculations for 0x3ee
-            first(preframes+16*i, bcode[0x3ed], bcode_0x3ee[i], 0x3ee + 1);
+            first(preframes+16*i, bcode[0x3ed], bcode_0x3ee, 0x3ee + 1);
         }
+        bcode_0x3ee &= 0xffffff00;
 
         std::cout << "hword hi: " << j << "/" << HIe << std::endl;
 
@@ -353,7 +357,7 @@ extern "C" bool find_collision (uint32_t *bcode, int type) {
         uint32_t hword = 0;
         uint32_t word = 0;
         bool found = false;
-        found = find256(hword, word, desired_checksum, preframes, bcode[0x3ed], bcode_0x3ee[0]);
+        found = find256(hword, word, desired_checksum, preframes, bcode[0x3ed], bcode_0x3ee);
         if (found) {
             // Write word to end of bootcode
             bcode[0x3ee] = hword;
