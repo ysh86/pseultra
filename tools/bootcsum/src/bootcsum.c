@@ -8,25 +8,33 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 
-#define MAGIC 0x95DACFDC
+#define MAGIC1 (((0x6c078965ULL * 0x3f) & 0xffffffff) + 1)
+#define MAGIC2 (((0x6c078965ULL * 0x3f) & 0xffffffff) + 1)
+#define MAGIC3 (((0x6c078965ULL * 0x78) & 0xffffffff) + 1)
+#define MAGIC5 (((0x6c078965ULL * 0x91) & 0xffffffff) + 1)
+#define MAGIC6 (((0x6c078965ULL * 0x85) & 0xffffffff) + 1)
 
-uint64_t calculate_checksum (uint32_t *bcode);
+uint64_t calculate_checksum (uint32_t *bcode, int type);
 static inline uint64_t checksum_helper (uint64_t op1, uint64_t op2, uint64_t op3);
 
 int main (int argc, char *argv[]) {
     // If arguments not adequate
-    if (argc < 2) {
-        printf("Usage: bootcsum <rom file> [<expected checksum>]\n"); 
+    if (argc < 3) {
+        printf("Usage: bootcsum <rom file> <type(1,2,3,5,6)> [<expected checksum>]\n");
         return -1;
     }
     
     FILE* rom_file;
 
     uint32_t rom_buffer[0x1000 / sizeof(uint32_t)];
-    rom_file = fopen(argv[1], "r");
-    fread(rom_buffer, sizeof(uint32_t), 0x1000 / sizeof(uint32_t), rom_file);
+    rom_file = fopen(argv[1], "rb");
+    size_t n = fread(rom_buffer, sizeof(uint32_t), 0x1000 / sizeof(uint32_t), rom_file);
     fclose(rom_file); 
+    if (n != 0x1000 / sizeof(uint32_t)) {
+        return -1;
+    }
 
     // LE to BE
     for (int i = 0; i < 0x1000 / sizeof(uint32_t); i++) {
@@ -36,18 +44,18 @@ int main (int argc, char *argv[]) {
     }
 
     // Verification or calculation
-    if (argc == 2) {
+    if (argc == 3) {
         // Calculation
-        uint64_t checksum = calculate_checksum(&rom_buffer[0x10]);
+        uint64_t checksum = calculate_checksum(&rom_buffer[0x10], atoi(argv[2]));
 
-        printf("0x%llx\n", checksum);
+        printf("0x%" PRIx64 "\n", checksum);
         return 0;
     }
     
-    if (argc == 3) {
+    if (argc == 4) {
         // Verification
-        uint64_t expected_checksum = strtol(argv[2], NULL, 0);
-        uint64_t checksum = calculate_checksum(&rom_buffer[0x10]); 
+        uint64_t expected_checksum = strtoll(argv[3], NULL, 0);
+        uint64_t checksum = calculate_checksum(&rom_buffer[0x10], atoi(argv[2]));
        
         if (checksum == expected_checksum) {
             printf("Correct\n");
@@ -55,7 +63,7 @@ int main (int argc, char *argv[]) {
         }
         else {
             printf("Incorrect:\n");
-            printf("Expected 0x%llx, got 0x%llx\n", expected_checksum, checksum);
+            printf("Expected 0x%" PRIx64 ", got 0x%" PRIx64 "\n", expected_checksum, checksum);
             return -1;
         }
     }
@@ -85,7 +93,7 @@ static inline uint64_t checksum_helper (uint64_t op1, uint64_t op2, uint64_t op3
 /*
  * Decompiled checksum function 
  */ 
-uint64_t calculate_checksum (uint32_t *bcode) {
+uint64_t calculate_checksum (uint32_t *bcode, int type) {
     uint32_t *bcode_inst_ptr = bcode;
     uint32_t loop_count = 0;
     uint32_t bcode_inst = *bcode_inst_ptr;
@@ -96,7 +104,27 @@ uint64_t calculate_checksum (uint32_t *bcode) {
     uint32_t sframe [4];
 
     // Calculate magic number
-    uint32_t magic = MAGIC ^ bcode_inst;
+    uint32_t magic = bcode_inst;
+    switch (type) {
+    case 1:
+        magic ^= MAGIC1;
+        break;
+    case 2:
+        magic ^= MAGIC2;
+        break;
+    case 3:
+        magic ^= MAGIC3;
+        break;
+    case 5:
+        magic ^= MAGIC5;
+        break;
+    case 6:
+        magic ^= MAGIC6;
+        break;
+    default:
+        return -1;
+        break;
+    }
 
     // Generate frame. This is done earlier in IPC2
     for (int i = 0; i < 16; i ++) {
@@ -139,6 +167,15 @@ uint64_t calculate_checksum (uint32_t *bcode) {
 
         frame[8] = checksum_helper(frame[8], (bcode_inst << (0x20 - (prev_inst >> 27))) | (bcode_inst >> (prev_inst >> 27)), loop_count);
         
+        // debug
+#if 0
+        if (loop_count == 0x3EF) {
+            for (int i = 0; i < 16; i += 4) {
+                printf("%08x, %08x, %08x, %08x\n", frame[i+0], frame[i+1], frame[i+2], frame[i+3]);
+            }
+        }
+#endif
+
         if (loop_count == 0x3F0) break;
 
         uint32_t tmp1 = checksum_helper(frame[15], (bcode_inst >> (0x20 - (prev_inst >> 27))) | (bcode_inst << (prev_inst >> 27)), loop_count);
@@ -178,7 +215,7 @@ uint64_t calculate_checksum (uint32_t *bcode) {
         frame_word = *frame_word_ptr;
 
         // Calculations
-        sframe[0] += ((frame_word << (0x20 - frame_word & 0x1f)) | frame_word >> (frame_word & 0x1f));
+        sframe[0] += ((frame_word << ((0x20 - frame_word) & 0x1f)) | frame_word >> (frame_word & 0x1f));
 
         if (frame_word < sframe[0]) {
             sframe[1] += frame_word;
@@ -194,7 +231,7 @@ uint64_t calculate_checksum (uint32_t *bcode) {
             sframe[2] = checksum_helper(sframe[2], frame_word, frame_number);
         }
 
-        if (frame_word & 0x01 == 1) {
+        if ((frame_word & 0x01) == 1) {
             sframe[3] ^= frame_word;
         }
         else {
